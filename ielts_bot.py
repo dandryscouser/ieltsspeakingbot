@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, BotCommand
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -49,10 +49,10 @@ Then, evaluate their answer based on the 4 IELTS Speaking criteria:
 
 Provide brief, constructive feedback, highlight good vocabulary used, point out mistakes, and estimate a band score (e.g., 6.5).
 Keep your response concise and formatted nicely with emojis. Answer in English.
-Format your response like this:
-🗣 *Transcript:* [transcript here]
+Format your response using HTML tags:
+🗣 <b>Transcript:</b> [transcript here]
 
-📝 *Feedback:* [feedback here]
+📝 <b>Feedback:</b> [feedback here]
 """
 
 # === ОБРАБОТЧИКИ КОМАНД ===
@@ -66,11 +66,11 @@ async def cmd_start(message: Message, state: FSMContext):
     if user:
         name = user['name']
         welcome_text = (
-            f"👋 С возвращением, {name}! Я твой ИИ-репетитор по IELTS Speaking.\n\n"
+            f"👋 С возвращением, <b>{name}</b>! Я твой ИИ-репетитор по IELTS Speaking.\n\n"
             "🎤 Жду твои голосовые ответы для оценки!\n"
             "🎯 Нажми /task, чтобы получить случайное задание для тренировки."
         )
-        await message.answer(welcome_text, parse_mode="Markdown")
+        await message.answer(welcome_text, parse_mode="HTML")
     else:
         # Если пользователя нет, запрашиваем имя
         await message.answer("👋 Привет! Я твой ИИ-репетитор по IELTS Speaking.\n\nКак мне к тебе обращаться? Напиши свое имя:")
@@ -91,14 +91,14 @@ async def process_name(message: Message, state: FSMContext):
     await state.clear()
     
     welcome_text = (
-        f"Отлично, {name}! Приятно познакомиться.\n\n"
-        "🎤 *Как это работает:*\n"
+        f"Отлично, <b>{name}</b>! Приятно познакомиться.\n\n"
+        "🎤 <b>Как это работает:</b>\n"
         "Отправь мне голосовое сообщение с твоим ответом на любой вопрос IELTS.\n"
         "Я прослушаю его, переведу в текст и дам подробный фидбек!\n\n"
-        "🎯 *Хочешь потренироваться?* Нажми команду /task, чтобы выбрать часть экзамена и получить задание.\n\n"
+        "🎯 <b>Хочешь потренироваться?</b> Нажми команду /task, чтобы выбрать часть экзамена и получить задание.\n\n"
         "📚 А еще я буду каждый день присылать тебе полезные фразы для экзамена (или используй команду /phrase)."
     )
-    await message.answer(welcome_text, parse_mode="Markdown")
+    await message.answer(welcome_text, parse_mode="HTML")
 
 @dp.message(Command("task"))
 async def cmd_task(message: Message):
@@ -111,11 +111,11 @@ async def cmd_task(message: Message):
     ])
     
     await message.answer(
-        "🎯 *Выбери часть IELTS Speaking для тренировки:*\n\n"
+        "🎯 <b>Выбери часть IELTS Speaking для тренировки:</b>\n\n"
         "На настоящем экзамене эти части идут последовательно (введение, карточка-монолог и глубокая дискуссия по теме карточки).\n\n"
-        "Ты можешь тренировать их отдельно или выбрать *Full Exam* для полного погружения!",
+        "Ты можешь тренировать их отдельно или выбрать <b>Full Exam</b> для полного погружения!",
         reply_markup=keyboard,
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
 
 @dp.callback_query(F.data.startswith("task_"))
@@ -130,43 +130,40 @@ async def process_task_callback(callback: CallbackQuery):
         prompt = (
             "Generate a set of 3-4 IELTS Speaking Part 1 questions on a single random everyday topic "
             "(like work, studies, hometown, hobbies, or food). "
-            "Format cleanly using single asterisks *for bold*. No double asterisks."
+            "Format cleanly using HTML tags like <b>bold</b>. Do NOT use markdown asterisks (*)."
         )
     elif task_type == "task_p2":
         prompt = (
             "Generate a random, unique IELTS Speaking Part 2 cue card. "
             "Include the main topic and 3-4 bullet points. "
-            "Format cleanly using single asterisks *for bold*. No double asterisks."
+            "Format cleanly using HTML tags like <b>bold</b>. Do NOT use markdown asterisks (*)."
         )
     elif task_type == "task_p3":
         prompt = (
             "Generate a set of 3-4 IELTS Speaking Part 3 abstract discussion questions on a random societal topic. "
-            "Format cleanly using single asterisks *for bold*. No double asterisks."
+            "Format cleanly using HTML tags like <b>bold</b>. Do NOT use markdown asterisks (*)."
         )
     elif task_type == "task_full":
         prompt = (
             "Generate a complete, sequential IELTS Speaking mock test. "
             "Part 1: 3-4 short questions on an everyday topic. "
             "Part 2: A cue card on a different topic. "
-            "Part 3: 3-4 deep discussion questions strictly related to the Part 2 topic (this sequence is crucial, just like the real exam). "
-            "Format cleanly using single asterisks *for bold*. No double asterisks."
+            "Part 3: 3-4 deep discussion questions strictly related to the Part 2 topic. "
+            "Format cleanly using HTML tags like <b>bold</b>. Do NOT use markdown asterisks (*)."
         )
     else:
         return
 
     try:
         response = await asyncio.to_thread(model.generate_content, prompt)
-        
-        # Очищаем двойные звездочки, так как Telegram Markdown v1 их не любит
-        safe_text = response.text.replace("**", "*")
+        safe_text = response.text.replace("**", "") # На всякий случай удаляем звездочки, если нейросеть ошиблась
         
         try:
             await processing_msg.edit_text(
-                f"🎯 *Твое задание:*\n\n{safe_text}\n\n🎤 _Запиши голосовое сообщение с ответом, и я его проверю!_", 
-                parse_mode="Markdown"
+                f"🎯 <b>Твое задание:</b>\n\n{safe_text}\n\n🎤 <i>Запиши голосовое сообщение с ответом, и я его проверю!</i>", 
+                parse_mode="HTML"
             )
         except Exception:
-            # Если Telegram всё равно ругается на разметку (незакрытые символы), отправляем как обычный текст
             await processing_msg.edit_text(
                 f"🎯 Твое задание:\n\n{safe_text}\n\n🎤 Запиши голосовое сообщение с ответом, и я его проверю!"
             )
@@ -185,15 +182,16 @@ async def cmd_phrase(message: Message):
         prompt = (
             "Generate ONE random, advanced C1/C2 English idiom, phrasal verb, or collocation useful for IELTS Speaking. "
             "Pick a random topic to ensure variety. "
-            "Format strictly like this:\n"
-            "📌 *[Phrase in English]* - [Translation to Russian]\n"
-            "_[Example sentence in English]_"
+            "Format strictly using HTML like this:\n"
+            "📌 <b>[Phrase in English]</b> - [Translation to Russian]\n"
+            "<i>[Example sentence in English]</i>\n"
+            "Do NOT use markdown asterisks (*)."
         )
         response = await asyncio.to_thread(model.generate_content, prompt)
-        safe_text = response.text.replace("**", "*")
+        safe_text = response.text.replace("**", "")
         
         try:
-            await processing_msg.edit_text(f"Твоя случайная фраза для IELTS:\n\n{safe_text}", parse_mode="Markdown")
+            await processing_msg.edit_text(f"Твоя случайная фраза для IELTS:\n\n{safe_text}", parse_mode="HTML")
         except Exception:
             await processing_msg.edit_text(f"Твоя случайная фраза для IELTS:\n\n{safe_text}")
     except Exception as e:
@@ -204,14 +202,14 @@ async def cmd_phrase(message: Message):
 async def cmd_premium(message: Message):
     """Реклама платного канала с пробным периодом"""
     text = (
-        "👑 *Закрытый IELTS-клуб*\n\n"
+        "👑 <b>Закрытый IELTS-клуб</b>\n\n"
         "Хочешь получать еще больше пользы и быстрее прокачать свой Speaking? Присоединяйся к моему закрытому Telegram-каналу!\n"
         "Там мы разбираем сложные темы Part 3, я публикую крутые шаблоны ответов на 8.0+ и мы проводим еженедельные созвоны.\n\n"
-        "🎁 *Первый день — абсолютно бесплатно!* Затем всего 2000 тенге (или $5) в месяц.\n"
-        "👉 [Нажми сюда, чтобы забрать пробный день](ВСТАВЬ_СЮДА_ССЫЛКУ_ОТ_TRIBUTE)"
+        "🎁 <b>Первый день — абсолютно бесплатно!</b> Затем всего 2000 тенге (или $5) в месяц.\n"
+        "👉 <a href='ВСТАВЬ_СЮДА_ССЫЛКУ_ОТ_TRIBUTE'>Нажми сюда, чтобы забрать пробный день</a>"
     )
     # disable_web_page_preview=True убирает некрасивое превью ссылки внизу сообщения
-    await message.answer(text, parse_mode="Markdown", disable_web_page_preview=True)
+    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
 
 # === ОБРАБОТКА ГОЛОСОВЫХ СООБЩЕНИЙ ===
 
@@ -248,11 +246,11 @@ async def handle_voice(message: Message):
         await asyncio.to_thread(audio_file.delete)
         os.remove(file_path)
 
-        safe_feedback = feedback.replace("**", "*")
+        safe_feedback = feedback.replace("**", "")
 
         # 3. Отправляем финальный результат
         try:
-            await processing_msg.edit_text(safe_feedback, parse_mode="Markdown")
+            await processing_msg.edit_text(safe_feedback, parse_mode="HTML")
         except Exception:
             await processing_msg.edit_text(safe_feedback)
 
@@ -275,12 +273,13 @@ async def send_daily_phrase():
         prompt = (
             "Generate ONE random, advanced C1/C2 English idiom or collocation for IELTS Speaking. "
             "Pick a completely random topic (e.g., environment, technology, feelings, work) so it doesn't repeat. "
-            "Format strictly like this:\n"
-            "📌 *[Phrase in English]* - [Translation to Russian]\n"
-            "_[Example sentence in English]_"
+            "Format strictly using HTML like this:\n"
+            "📌 <b>[Phrase in English]</b> - [Translation to Russian]\n"
+            "<i>[Example sentence in English]</i>\n"
+            "Do NOT use markdown asterisks (*)."
         )
         response = await asyncio.to_thread(model.generate_content, prompt)
-        phrase = response.text.strip().replace("**", "*")
+        phrase = response.text.strip().replace("**", "")
     except Exception as e:
         logging.error(f"Daily phrase gen error: {e}")
         return
@@ -291,7 +290,7 @@ async def send_daily_phrase():
         try:
             # Обращаемся к пользователю по имени
             try:
-                await bot.send_message(user_id, f"🌟 *Ежедневная фраза для тебя, {name}:*\n\n{phrase}", parse_mode="Markdown")
+                await bot.send_message(user_id, f"🌟 <b>Ежедневная фраза для тебя, {name}:</b>\n\n{phrase}", parse_mode="HTML")
             except Exception:
                 await bot.send_message(user_id, f"🌟 Ежедневная фраза для тебя, {name}:\n\n{phrase}")
         except Exception as e:
@@ -317,6 +316,14 @@ async def start_dummy_server():
 async def main():
     logging.basicConfig(level=logging.INFO)
     
+    # Устанавливаем красивое меню команд в Telegram
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Перезапустить бота"),
+        BotCommand(command="task", description="Получить случайное задание"),
+        BotCommand(command="phrase", description="Полезная фраза для IELTS"),
+        BotCommand(command="premium", description="Закрытый IELTS-клуб")
+    ])
+
     # Инициализация пула соединений БД и автоматическое создание таблицы, если её нет
     global db_pool
     db_pool = await asyncpg.create_pool(DATABASE_URL)
@@ -339,6 +346,9 @@ async def main():
     print("Бот успешно запущен!")
     # Запуск поллинга
     await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())

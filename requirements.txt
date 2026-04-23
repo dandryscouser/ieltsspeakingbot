@@ -3,4 +3,3 @@ google-generativeai
 apscheduler==3.10.4
 asyncpg==0.29.0
 aiohttp==3.9.3
-2. **Создай Web Service на Render**. При создании выбери **Web Service** (не Background Worker, так как он платный).

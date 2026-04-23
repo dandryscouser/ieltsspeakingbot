@@ -10,6 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import google.generativeai as genai
 import asyncpg
+from aiohttp import web
 
 # === НАСТРОЙКИ ===
 # Вставь сюда свои токены или получай их из переменных окружения
@@ -273,6 +274,21 @@ async def send_daily_phrase():
         except Exception as e:
             logging.error(f"Failed to send phrase to {user_id}: {e}")
 
+# === ФИКТИВНЫЙ ВЕБ-СЕРВЕР ДЛЯ RENDER ===
+
+async def handle_ping(request):
+    return web.Response(text="Бот работает и слушает Render!")
+
+async def start_dummy_server():
+    app = web.Application()
+    app.router.add_get('/', handle_ping)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.getenv("PORT", 8080)) # Render сам передаст нужный порт
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logging.info(f"Фиктивный веб-сервер запущен на порту {port}")
+
 # === ЗАПУСК БОТА ===
 
 async def main():
@@ -293,6 +309,9 @@ async def main():
     # Для теста можно поменять 'cron' на 'interval', seconds=30
     scheduler.add_job(send_daily_phrase, 'cron', hour=10, minute=0)
     scheduler.start()
+    
+    # Запускаем фиктивный веб-сервер для Render
+    await start_dummy_server()
     
     print("Бот успешно запущен!")
     # Запуск поллинга

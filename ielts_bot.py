@@ -95,7 +95,7 @@ async def process_name(message: Message, state: FSMContext):
         "🎤 *Как это работает:*\n"
         "Отправь мне голосовое сообщение с твоим ответом на любой вопрос IELTS.\n"
         "Я прослушаю его, переведу в текст и дам подробный фидбек!\n\n"
-        "🎯 *Хочешь потренироваться?* Нажми /task, и я сгенерирую для тебя случайное задание (Cue Card) из IELTS Speaking Part 2.\n\n"
+        "🎯 *Хочешь потренироваться?* Нажми команду /task, чтобы выбрать часть экзамена и получить задание.\n\n"
         "📚 А еще я буду каждый день присылать тебе полезные фразы для экзамена (или используй команду /phrase)."
     )
     await message.answer(welcome_text, parse_mode="Markdown")
@@ -156,10 +156,20 @@ async def process_task_callback(callback: CallbackQuery):
 
     try:
         response = await asyncio.to_thread(model.generate_content, prompt)
-        await processing_msg.edit_text(
-            f"🎯 *Твое задание:*\n\n{response.text}\n\n🎤 _Запиши голосовое сообщение с ответом, и я его проверю!_", 
-            parse_mode="Markdown"
-        )
+        
+        # Очищаем двойные звездочки, так как Telegram Markdown v1 их не любит
+        safe_text = response.text.replace("**", "*")
+        
+        try:
+            await processing_msg.edit_text(
+                f"🎯 *Твое задание:*\n\n{safe_text}\n\n🎤 _Запиши голосовое сообщение с ответом, и я его проверю!_", 
+                parse_mode="Markdown"
+            )
+        except Exception:
+            # Если Telegram всё равно ругается на разметку (незакрытые символы), отправляем как обычный текст
+            await processing_msg.edit_text(
+                f"🎯 Твое задание:\n\n{safe_text}\n\n🎤 Запиши голосовое сообщение с ответом, и я его проверю!"
+            )
     except Exception as e:
         logging.error(f"Task gen error: {e}")
         await processing_msg.edit_text("❌ Произошла ошибка при генерации задания. Попробуй позже.")
@@ -180,7 +190,12 @@ async def cmd_phrase(message: Message):
             "_[Example sentence in English]_"
         )
         response = await asyncio.to_thread(model.generate_content, prompt)
-        await processing_msg.edit_text(f"Твоя случайная фраза для IELTS:\n\n{response.text}", parse_mode="Markdown")
+        safe_text = response.text.replace("**", "*")
+        
+        try:
+            await processing_msg.edit_text(f"Твоя случайная фраза для IELTS:\n\n{safe_text}", parse_mode="Markdown")
+        except Exception:
+            await processing_msg.edit_text(f"Твоя случайная фраза для IELTS:\n\n{safe_text}")
     except Exception as e:
         logging.error(f"Phrase gen error: {e}")
         await processing_msg.edit_text("❌ Произошла ошибка при поиске фразы.")
@@ -233,8 +248,13 @@ async def handle_voice(message: Message):
         await asyncio.to_thread(audio_file.delete)
         os.remove(file_path)
 
+        safe_feedback = feedback.replace("**", "*")
+
         # 3. Отправляем финальный результат
-        await processing_msg.edit_text(feedback, parse_mode="Markdown")
+        try:
+            await processing_msg.edit_text(safe_feedback, parse_mode="Markdown")
+        except Exception:
+            await processing_msg.edit_text(safe_feedback)
 
     except Exception as e:
         logging.error(f"Error processing voice: {e}")
@@ -260,7 +280,7 @@ async def send_daily_phrase():
             "_[Example sentence in English]_"
         )
         response = await asyncio.to_thread(model.generate_content, prompt)
-        phrase = response.text.strip()
+        phrase = response.text.strip().replace("**", "*")
     except Exception as e:
         logging.error(f"Daily phrase gen error: {e}")
         return
@@ -270,7 +290,10 @@ async def send_daily_phrase():
         name = user['name']
         try:
             # Обращаемся к пользователю по имени
-            await bot.send_message(user_id, f"🌟 *Ежедневная фраза для тебя, {name}:*\n\n{phrase}", parse_mode="Markdown")
+            try:
+                await bot.send_message(user_id, f"🌟 *Ежедневная фраза для тебя, {name}:*\n\n{phrase}", parse_mode="Markdown")
+            except Exception:
+                await bot.send_message(user_id, f"🌟 Ежедневная фраза для тебя, {name}:\n\n{phrase}")
         except Exception as e:
             logging.error(f"Failed to send phrase to {user_id}: {e}")
 

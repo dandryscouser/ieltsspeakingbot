@@ -31,6 +31,9 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = None
 db_pool = None
 
+# Хранилище для фоновых задач (чтобы Python их не удалял сборщиком мусора)
+background_tasks = set()
+
 # === СОСТОЯНИЯ (FSM) ===
 class Registration(StatesGroup):
     waiting_for_name = State()
@@ -157,27 +160,24 @@ async def cmd_task(message: Message, state: FSMContext):
 # --- ТАЙМЕР ДЛЯ PART 2 ---
 async def part2_timer(user_id: int, state: FSMContext, bot: Bot):
     """Асинхронный таймер для имитации реального экзамена"""
-    await asyncio.sleep(70) # 10 сек чтение + 60 сек подготовка
-    current_state = await state.get_state()
-    if current_state == ExamState.waiting_for_part2.state:
-        try:
+    try:
+        await asyncio.sleep(70) # 10 сек чтение + 60 сек подготовка
+        current_state = await state.get_state()
+        if current_state == ExamState.waiting_for_part2.state:
             await bot.send_message(
                 user_id, 
                 "⏳ <b>Время на подготовку вышло!</b>\nНачинай говорить. Жду твое аудио (до 2 минут).\n\n<i>⚠️ У тебя есть 3 минуты на отправку ответа.</i>", 
                 parse_mode="HTML"
             )
-        except Exception:
-            pass
-        
-        # Ожидаем ответа 3 минуты (180 секунд)
-        await asyncio.sleep(180)
-        current_state = await state.get_state()
-        if current_state == ExamState.waiting_for_part2.state:
-            try:
+            
+            # Ожидаем ответа 3 минуты (180 секунд)
+            await asyncio.sleep(180)
+            current_state = await state.get_state()
+            if current_state == ExamState.waiting_for_part2.state:
                 await bot.send_message(user_id, "❌ <b>Время вышло!</b> Ты не отправил аудиоответ за 3 минуты. Задание отменено. Жми /task для нового.", parse_mode="HTML")
-            except Exception:
-                pass
-            await state.clear()
+                await state.clear()
+    except Exception as e:
+        logging.error(f"Timer error for user {user_id}: {e}")
 
 
 @dp.callback_query(F.data.startswith("task_"))
@@ -206,7 +206,11 @@ async def process_task_callback(callback: CallbackQuery, state: FSMContext):
         if is_part_2:
             # Если это Part 2, запускаем таймер
             await state.set_state(ExamState.waiting_for_part2)
-            asyncio.create_task(part2_timer(callback.from_user.id, state, bot))
+            
+            # Создаем задачу и СОХРАНЯЕМ на нее ссылку, чтобы Python ее не удалил
+            task = asyncio.create_task(part2_timer(callback.from_user.id, state, bot))
+            background_tasks.add(task)
+            task.add_done_callback(background_tasks.discard)
             
             msg_text = (f"🎯 <b>Твое задание (Part 2):</b>\n\n{safe_text}\n\n"
                         f"⏱ <i>У тебя есть 70 секунд (10 на чтение и 60 на подготовку). Я пришлю уведомление, когда нужно будет начать говорить!</i>")

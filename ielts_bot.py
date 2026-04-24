@@ -11,12 +11,17 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import google.generativeai as genai
 import asyncpg
 from aiohttp import web
+import re
+import csv
+import io
 
 # === НАСТРОЙКИ ===
 # Вставь сюда свои токены или получай их из переменных окружения
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "ТВОЙ_ТЕЛЕГРАМ_ТОКЕН")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "ТВОЙ_GEMINI_ТОКЕН")
 DATABASE_URL = os.getenv("DATABASE_URL", "ТВОЙ_DATABASE_URL")
+# ID администратора (твой Telegram ID)
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 # Инициализация бота, диспетчера
 bot = Bot(token=TELEGRAM_TOKEN)
@@ -47,12 +52,15 @@ Then, evaluate their answer based on the 4 IELTS Speaking criteria:
 3. Grammatical Range and Accuracy
 4. Pronunciation
 
-Provide brief, constructive feedback, highlight good vocabulary used, point out mistakes, and estimate a band score (e.g., 6.5).
+Provide brief, constructive feedback, highlight good vocabulary used, point out mistakes.
+At the very end, give a final estimated band score (from 0 to 9.0).
 Keep your response concise and formatted nicely with emojis. Answer in English.
-Format your response using HTML tags:
+Format your response EXACTLY using these HTML tags:
 🗣 <b>Transcript:</b> [transcript here]
 
 📝 <b>Feedback:</b> [feedback here]
+
+📊 <b>Band Score:</b> [Score here, e.g., 6.5]
 """
 
 # === ОБРАБОТЧИКИ КОМАНД ===
@@ -130,18 +138,18 @@ async def process_task_callback(callback: CallbackQuery):
         prompt = (
             "Generate a set of 3-4 IELTS Speaking Part 1 questions on a single random everyday topic "
             "(like work, studies, hometown, hobbies, or food). "
-            "Format cleanly using HTML tags like <b>bold</b>. Do NOT use markdown asterisks (*)."
+            "Format cleanly using ONLY <b> and <i> HTML tags. DO NOT use <ul>, <li> or any other HTML tags. Use standard dashes (-) for bullet points. Do NOT use markdown asterisks (*)."
         )
     elif task_type == "task_p2":
         prompt = (
             "Generate a random, unique IELTS Speaking Part 2 cue card. "
             "Include the main topic and 3-4 bullet points. "
-            "Format cleanly using HTML tags like <b>bold</b>. Do NOT use markdown asterisks (*)."
+            "Format cleanly using ONLY <b> and <i> HTML tags. DO NOT use <ul>, <li> or any other HTML tags. Use standard dashes (-) for bullet points. Do NOT use markdown asterisks (*)."
         )
     elif task_type == "task_p3":
         prompt = (
             "Generate a set of 3-4 IELTS Speaking Part 3 abstract discussion questions on a random societal topic. "
-            "Format cleanly using HTML tags like <b>bold</b>. Do NOT use markdown asterisks (*)."
+            "Format cleanly using ONLY <b> and <i> HTML tags. DO NOT use <ul>, <li> or any other HTML tags. Use standard dashes (-) for bullet points. Do NOT use markdown asterisks (*)."
         )
     elif task_type == "task_full":
         prompt = (
@@ -149,27 +157,29 @@ async def process_task_callback(callback: CallbackQuery):
             "Part 1: 3-4 short questions on an everyday topic. "
             "Part 2: A cue card on a different topic. "
             "Part 3: 3-4 deep discussion questions strictly related to the Part 2 topic. "
-            "Format cleanly using HTML tags like <b>bold</b>. Do NOT use markdown asterisks (*)."
+            "Format cleanly using ONLY <b> and <i> HTML tags. DO NOT use <ul>, <li> or any other HTML tags. Use standard dashes (-) for bullet points. Do NOT use markdown asterisks (*)."
         )
     else:
         return
 
     try:
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        safe_text = response.text.replace("**", "") # На всякий случай удаляем звездочки, если нейросеть ошиблась
+        # ИСПОЛЬЗУЕМ ВСТРОЕННЫЙ АСИНХРОННЫЙ МЕТОД GEMINI
+        response = await model.generate_content_async(prompt)
+        safe_text = response.text.replace("**", "") # На всякий случай удаляем звездочки
         
         try:
             await processing_msg.edit_text(
                 f"🎯 <b>Твое задание:</b>\n\n{safe_text}\n\n🎤 <i>Запиши голосовое сообщение с ответом, и я его проверю!</i>", 
                 parse_mode="HTML"
             )
-        except Exception:
+        except Exception as format_err:
+            logging.error(f"Format error: {format_err}")
             await processing_msg.edit_text(
                 f"🎯 Твое задание:\n\n{safe_text}\n\n🎤 Запиши голосовое сообщение с ответом, и я его проверю!"
             )
     except Exception as e:
         logging.error(f"Task gen error: {e}")
-        await processing_msg.edit_text("❌ Произошла ошибка при генерации задания. Попробуй позже.")
+        await processing_msg.edit_text(f"❌ Произошла ошибка при генерации: {str(e)}")
     
     # Отвечаем серверу Telegram, что клик обработан
     await callback.answer()
@@ -185,9 +195,10 @@ async def cmd_phrase(message: Message):
             "Format strictly using HTML like this:\n"
             "📌 <b>[Phrase in English]</b> - [Translation to Russian]\n"
             "<i>[Example sentence in English]</i>\n"
-            "Do NOT use markdown asterisks (*)."
+            "DO NOT use <ul>, <li>, or markdown asterisks (*)."
         )
-        response = await asyncio.to_thread(model.generate_content, prompt)
+        # ИСПОЛЬЗУЕМ ВСТРОЕННЫЙ АСИНХРОННЫЙ МЕТОД GEMINI
+        response = await model.generate_content_async(prompt)
         safe_text = response.text.replace("**", "")
         
         try:
@@ -196,20 +207,45 @@ async def cmd_phrase(message: Message):
             await processing_msg.edit_text(f"Твоя случайная фраза для IELTS:\n\n{safe_text}")
     except Exception as e:
         logging.error(f"Phrase gen error: {e}")
-        await processing_msg.edit_text("❌ Произошла ошибка при поиске фразы.")
+        await processing_msg.edit_text(f"❌ Ошибка генерации: {str(e)}")
 
-@dp.message(Command("premium"))
-async def cmd_premium(message: Message):
-    """Реклама платного канала с пробным периодом"""
-    text = (
-        "👑 <b>Закрытый IELTS-клуб</b>\n\n"
-        "Хочешь получать еще больше пользы и быстрее прокачать свой Speaking? Присоединяйся к моему закрытому Telegram-каналу!\n"
-        "Там мы разбираем сложные темы Part 3, я публикую крутые шаблоны ответов на 8.0+ и мы проводим еженедельные созвоны.\n\n"
-        "🎁 <b>Первый день — абсолютно бесплатно!</b> Затем всего 2000 тенге (или $5) в месяц.\n"
-        "👉 <a href='ВСТАВЬ_СЮДА_ССЫЛКУ_ОТ_TRIBUTE'>Нажми сюда, чтобы забрать пробный день</a>"
-    )
-    # disable_web_page_preview=True убирает некрасивое превью ссылки внизу сообщения
-    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+@dp.message(Command("export"))
+async def cmd_export(message: Message):
+    """Выгружает таблицу со всеми попытками и баллами пользователей (ТОЛЬКО ДЛЯ АДМИНА)"""
+    # ПРОВЕРКА НА АДМИНИСТРАТОРА
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("❌ У вас нет прав для выполнения этой команды.")
+        return
+
+    processing_msg = await message.answer("⏳ Собираю данные из базы...")
+    
+    async with db_pool.acquire() as conn:
+        records = await conn.fetch('''
+            SELECT u.name, a.attempt_number, a.score
+            FROM attempts a
+            JOIN users u ON a.user_id = u.user_id
+            ORDER BY u.name, a.attempt_number
+        ''')
+    
+    if not records:
+        await processing_msg.edit_text("❌ Нет данных для выгрузки (никто еще не отправлял аудио).")
+        return
+
+    # Создаем CSV файл в оперативной памяти
+    output = io.StringIO()
+    writer = csv.writer(output)
+    # Пишем заголовки (Уникальное имя - Попытка - Балл)
+    writer.writerow(['Имя пользователя', 'Попытка №', 'Балл'])
+    
+    for r in records:
+        writer.writerow([r['name'], r['attempt_number'], r['score']])
+    
+    output.seek(0)
+    # Преобразуем в файл для отправки в Telegram
+    file = types.BufferedInputFile(output.getvalue().encode('utf-8'), filename="ielts_results.csv")
+    
+    await processing_msg.delete()
+    await message.answer_document(file, caption="📊 Таблица со всеми результатами учеников")
 
 # === ОБРАБОТКА ГОЛОСОВЫХ СООБЩЕНИЙ ===
 
@@ -231,12 +267,12 @@ async def handle_voice(message: Message):
             user = await conn.fetchrow('SELECT name FROM users WHERE user_id = $1', message.from_user.id)
         user_name = user['name'] if user else "Student"
 
-        # 2. Загружаем аудио в Google AI Studio и получаем ответ
-        # Так как Gemini SDK работает синхронно, запускаем в отдельном потоке
+        # 2. Загружаем аудио в Google AI Studio
+        # Загрузка файла остается в to_thread, так как upload_file синхронный
         audio_file = await asyncio.to_thread(genai.upload_file, path=file_path)
         
-        response = await asyncio.to_thread(
-            model.generate_content,
+        # ИСПОЛЬЗУЕМ ВСТРОЕННЫЙ АСИНХРОННЫЙ МЕТОД ДЛЯ ГЕНЕРАЦИИ С АУДИО
+        response = await model.generate_content_async(
             [get_ielts_prompt(user_name), audio_file]
         )
         
@@ -248,6 +284,15 @@ async def handle_voice(message: Message):
 
         safe_feedback = feedback.replace("**", "")
 
+        # Извлекаем оценку (Band Score) с помощью регулярного выражения
+        score_match = re.search(r'Band Score:</b>\s*([\d\.]+)', safe_feedback, re.IGNORECASE)
+        band_score = score_match.group(1) if score_match else "N/A"
+
+        # Считаем номер попытки и сохраняем результат в базу данных
+        async with db_pool.acquire() as conn:
+            attempt_num = await conn.fetchval('SELECT COALESCE(MAX(attempt_number), 0) + 1 FROM attempts WHERE user_id = $1', message.from_user.id)
+            await conn.execute('INSERT INTO attempts (user_id, attempt_number, score) VALUES ($1, $2, $3)', message.from_user.id, attempt_num, band_score)
+
         # 3. Отправляем финальный результат
         try:
             await processing_msg.edit_text(safe_feedback, parse_mode="HTML")
@@ -256,7 +301,7 @@ async def handle_voice(message: Message):
 
     except Exception as e:
         logging.error(f"Error processing voice: {e}")
-        await processing_msg.edit_text("❌ Произошла ошибка при обработке аудио. Возможно, проблема с API ключом Gemini.")
+        await processing_msg.edit_text(f"❌ Произошла ошибка при обработке аудио: {str(e)}")
 
 # === ЕЖЕДНЕВНАЯ РАССЫЛКА ===
 
@@ -278,7 +323,8 @@ async def send_daily_phrase():
             "<i>[Example sentence in English]</i>\n"
             "Do NOT use markdown asterisks (*)."
         )
-        response = await asyncio.to_thread(model.generate_content, prompt)
+        # ИСПОЛЬЗУЕМ ВСТРОЕННЫЙ АСИНХРОННЫЙ МЕТОД
+        response = await model.generate_content_async(prompt)
         phrase = response.text.strip().replace("**", "")
     except Exception as e:
         logging.error(f"Daily phrase gen error: {e}")
@@ -316,12 +362,11 @@ async def start_dummy_server():
 async def main():
     logging.basicConfig(level=logging.INFO)
     
-    # Устанавливаем красивое меню команд в Telegram
+    # Устанавливаем красивое меню команд в Telegram (УБРАЛИ EXPORT ИЗ ОБЩЕГО МЕНЮ)
     await bot.set_my_commands([
         BotCommand(command="start", description="Перезапустить бота"),
         BotCommand(command="task", description="Получить случайное задание"),
-        BotCommand(command="phrase", description="Полезная фраза для IELTS"),
-        BotCommand(command="premium", description="Закрытый IELTS-клуб")
+        BotCommand(command="phrase", description="Полезная фраза для IELTS")
     ])
 
     # Инициализация пула соединений БД и автоматическое создание таблицы, если её нет
@@ -332,11 +377,17 @@ async def main():
             CREATE TABLE IF NOT EXISTS users (
                 user_id BIGINT PRIMARY KEY,
                 name VARCHAR(255)
-            )
+            );
+            CREATE TABLE IF NOT EXISTS attempts (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                attempt_number INT,
+                score VARCHAR(10),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
         ''')
 
     # Настраиваем планировщик для ежедневной рассылки (например, в 10:00 утра)
-    # Для теста можно поменять 'cron' на 'interval', seconds=30
     scheduler.add_job(send_daily_phrase, 'cron', hour=10, minute=0)
     scheduler.start()
     
@@ -344,11 +395,12 @@ async def main():
     await start_dummy_server()
     
     print("Бот успешно запущен!")
+    
+    # Сбрасываем вебхуки и зависшие апдейты, чтобы избежать конфликтов при перезапусках
+    await bot.delete_webhook(drop_pending_updates=True)
+    
     # Запуск поллинга
     await dp.start_polling(bot)
-
-if __name__ == "__main__":
-    asyncio.run(main())
 
 if __name__ == "__main__":
     asyncio.run(main())

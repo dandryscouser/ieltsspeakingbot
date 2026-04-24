@@ -233,7 +233,8 @@ async def cmd_export(message: Message):
 
     # Создаем CSV файл в оперативной памяти
     output = io.StringIO()
-    writer = csv.writer(output)
+    # Для Excel в СНГ лучше использовать точку с запятой как разделитель
+    writer = csv.writer(output, delimiter=';')
     # Пишем заголовки (Уникальное имя - Попытка - Балл)
     writer.writerow(['Имя пользователя', 'Попытка №', 'Балл'])
     
@@ -242,7 +243,8 @@ async def cmd_export(message: Message):
     
     output.seek(0)
     # Преобразуем в файл для отправки в Telegram
-    file = types.BufferedInputFile(output.getvalue().encode('utf-8'), filename="ielts_results.csv")
+    # Используем 'utf-8-sig' (с BOM), чтобы Excel автоматически правильно распознал кириллицу
+    file = types.BufferedInputFile(output.getvalue().encode('utf-8-sig'), filename="ielts_results.csv")
     
     await processing_msg.delete()
     await message.answer_document(file, caption="📊 Таблица со всеми результатами учеников")

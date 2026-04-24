@@ -372,20 +372,29 @@ async def main():
     # --- АВТОМАТИЧЕСКИЙ ПОИСК ДОСТУПНОЙ МОДЕЛИ GEMINI ---
     global model
     try:
+        # Получаем список всех моделей, которые поддерживают генерацию текста
         available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         logging.info(f"Доступные API модели: {available_models}")
         
-        target_model = 'gemini-1.5-flash' # Значение по умолчанию
+        target_model = None
+        # Ищем любую доступную модель со словом flash (например gemini-2.0-flash или gemini-flash)
         for m in available_models:
-            if '1.5-flash' in m:
+            if 'flash' in m.lower():
                 target_model = m.replace('models/', '')
                 break
-                
+        
+        # Если flash-моделей нет, берем самую первую рабочую модель из списка Google
+        if not target_model and available_models:
+            target_model = available_models[0].replace('models/', '')
+            
+        if not target_model:
+            target_model = 'gemini-1.5-flash-latest' # Экстренный фоллбэк
+            
         logging.info(f"✅ Успешно выбрана модель: {target_model}")
         model = genai.GenerativeModel(target_model)
     except Exception as e:
         logging.error(f"❌ Ошибка при проверке моделей: {e}")
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash-latest')
 
     # Инициализация пула соединений БД и автоматическое создание таблицы, если её нет
     global db_pool

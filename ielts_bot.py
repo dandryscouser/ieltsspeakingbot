@@ -30,8 +30,8 @@ scheduler = AsyncIOScheduler()
 
 # Настройка Google AI Studio (Gemini)
 genai.configure(api_key=GEMINI_API_KEY)
-# Используем модель 1.5 Flash, так как она отлично работает с аудио и бесплатна в лимитах
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Модель будет инициализирована при запуске бота (чтобы проверить доступность серверов Google)
+model = None
 
 # Пул подключений к базе данных PostgreSQL
 db_pool = None
@@ -368,6 +368,24 @@ async def main():
         BotCommand(command="task", description="Получить случайное задание"),
         BotCommand(command="phrase", description="Полезная фраза для IELTS")
     ])
+
+    # --- АВТОМАТИЧЕСКИЙ ПОИСК ДОСТУПНОЙ МОДЕЛИ GEMINI ---
+    global model
+    try:
+        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        logging.info(f"Доступные API модели: {available_models}")
+        
+        target_model = 'gemini-1.5-flash' # Значение по умолчанию
+        for m in available_models:
+            if '1.5-flash' in m:
+                target_model = m.replace('models/', '')
+                break
+                
+        logging.info(f"✅ Успешно выбрана модель: {target_model}")
+        model = genai.GenerativeModel(target_model)
+    except Exception as e:
+        logging.error(f"❌ Ошибка при проверке моделей: {e}")
+        model = genai.GenerativeModel('gemini-1.5-flash')
 
     # Инициализация пула соединений БД и автоматическое создание таблицы, если её нет
     global db_pool
